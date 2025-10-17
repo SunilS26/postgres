@@ -573,7 +573,6 @@ bringetbitmap(IndexScanDesc scan, TIDBitmap *tbm)
 	Relation	heapRel;
 	BrinOpaque *opaque;
 	BlockNumber nblocks;
-	BlockNumber heapBlk;
 	int64		totalpages = 0;
 	FmgrInfo   *consistentFn;
 	MemoryContext oldcxt;
@@ -736,8 +735,11 @@ bringetbitmap(IndexScanDesc scan, TIDBitmap *tbm)
 	 * Now scan the revmap.  We start by querying for heap page 0,
 	 * incrementing by the number of pages per range; this gives us a full
 	 * view of the table.
+	 *
+	 * We now use a uint64 for heapBlk to avoid an overflow when working with
+	 * extremely large tables.
 	 */
-	for (heapBlk = 0; heapBlk < nblocks; heapBlk += opaque->bo_pagesPerRange)
+	for (uint64 heapBlk = 0; heapBlk < nblocks; heapBlk += opaque->bo_pagesPerRange)
 	{
 		bool		addrange;
 		bool		gottuple = false;
@@ -749,7 +751,7 @@ bringetbitmap(IndexScanDesc scan, TIDBitmap *tbm)
 
 		MemoryContextReset(perRangeCxt);
 
-		tup = brinGetTupleForHeapBlock(opaque->bo_rmAccess, heapBlk, &buf,
+		tup = brinGetTupleForHeapBlock(opaque->bo_rmAccess, (BlockNumber )heapBlk, &buf,
 									   &off, &size, BUFFER_LOCK_SHARE);
 		if (tup)
 		{
@@ -924,9 +926,7 @@ bringetbitmap(IndexScanDesc scan, TIDBitmap *tbm)
 		/* add the pages in the range to the output bitmap, if needed */
 		if (addrange)
 		{
-			BlockNumber pageno;
-
-			for (pageno = heapBlk;
+			for (uint64 pageno = heapBlk;
 				 pageno <= Min(nblocks, heapBlk + opaque->bo_pagesPerRange) - 1;
 				 pageno++)
 			{
